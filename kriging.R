@@ -36,3 +36,7 @@ dane$cena = as.numeric(gsub(",", ".", dane$cena, fixed=TRUE))
 dane$N = dane$`wielkosc ruchu`
 dane$`liczba gwiazdek` = as.numeric(gsub(",", ".", dane$`liczba gwiazdek`, fixed=TRUE))
 dane$`średni spędzany czas (min)`=as.numeric(dane$`średni spędzany czas (min)`)
+
+# dane punktowe
+coordinates(firmy) <- ~coords.x1+coords.x2
+bubble(firmy, "zatr", maxsize=2.5, main ="Lokalizacja punktów", key.entries=5*c(1,6,30,120,300), alpha=1/2)
