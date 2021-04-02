@@ -1,0 +1,57 @@
+---
+author: "Aleksandra Lubicka"
+title: "Geo project"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    code_folding: "hide"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.align = 'center', out.width = '80%', echo = TRUE)
+library("readxl")
+library(dplyr)
+library(tidyverse)
+library(sf)
+library(osmdata)    
+#devtools::install_github('osmdatar/osmdata')
+library(ggmap)
+library(leaflet) 
+library(rgdal)
+library(GISTools)
+library(sp)
+library(spdep)
+library(spatialreg)
+library(corrplot)
+library(caret)
+library(dismo)
+library(fields)
+library(gridExtra)
+#library(gstat)
+library(pgirmess)
+library(raster)
+library(rasterVis)
+library(rgeos)
+library(shapefiles)
+library(geoR)
+library(maptools)
+library(spdep)
+library(rgdal)
+library(sp)
+library(spatstat)
+# python from Rmd
+#conda activate r-reticulate
+library(reticulate)
+```
+
+
+```{python}
+x=[1,2,3]
+```
+
+```{r}
+py$x
+```
+
