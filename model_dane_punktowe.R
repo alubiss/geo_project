@@ -9,7 +9,6 @@ dane$`liczba gwiazdek` = as.numeric(gsub(",", ".", dane$`liczba gwiazdek`, fixed
 dane$`średni spędzany czas (min)`=as.numeric(dane$`średni spędzany czas (min)`)
 
 
-
 dane = pop.df.warsaw %>% dplyr ::  filter(ruch != 0)
 coords <- SpatialPoints(dane[,1:2], proj4string=CRS("+proj=longlat +datum=NAD83"))
 cont.listw <- nb2listw(knn2nb(knearneigh(coords, k = 6, longlat = TRUE)), style = "W")
