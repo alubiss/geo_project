@@ -1,4 +1,8 @@
-
+.RData
+.Rhistory
+dane.csv
+dane_ost.csv
+pop_df_warsaw.csv
 *.swp
 .DS_Store
 .ipynb_checkpoints/

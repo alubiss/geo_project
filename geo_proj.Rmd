@@ -44,11 +44,23 @@ library(spatstat)
 # python from Rmd
 #conda activate r-reticulate
 library(reticulate)
+use_python('/opt/anaconda3/bin/python')
+py_install("contextily")
 ```
 
 
 ```{python}
-x=[1,2,3]
+import pandas as pd
+import geopandas
+import matplotlib.pyplot as plt
+import contextily
+pop_df_warsaw = pd.read_csv("pop_df_warsaw.csv")
+df = pd.read_csv("dane.csv")
+pop_df_warsaw = geopandas.GeoDataFrame(pop_df_warsaw, geometry=geopandas.points_from_xy(pop_df_warsaw.SHAPE_Leng, pop_df_warsaw.SHAPE_Area), crs='epsg:3035')
+stacje = geopandas.GeoDataFrame(df, geometry=geopandas.points_from_xy(df.x, df.y), crs='epsg:4326')
+ax = stacje.plot(markersize=1)
+contextily.add_basemap(ax, crs=stacje.crs.to_string())
+plt.show()
 ```
 
 ```{r}
