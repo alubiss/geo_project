@@ -1,6 +1,6 @@
 ---
-author: "Aleksandra Lubicka"
-title: "Geo project"
+author: "Aleksandra Lubicka, Rafał Kaczmarek"
+title: "RR project"
 output:
   html_document:
     toc: true
@@ -22,34 +22,41 @@ library(leaflet)
 library(rgdal)
 library(GISTools)
 library(sp)
-library(spdep)
-library(spatialreg)
+#library(spdep)
+#library(spatialreg)
 library(corrplot)
 library(caret)
-library(dismo)
+#library(dismo)
 library(fields)
 library(gridExtra)
 #library(gstat)
-library(pgirmess)
-library(raster)
-library(rasterVis)
+#library(pgirmess)
+#library(raster)
+#library(rasterVis)
 library(rgeos)
 library(shapefiles)
 library(geoR)
 library(maptools)
-library(spdep)
+#library(spdep)
 library(rgdal)
 library(sp)
 library(spatstat)
+library("readxl")
 # python from Rmd
 #conda activate r-reticulate
 library(reticulate)
 use_python('/opt/anaconda3/bin/python')
-py_install("contextily")
+#py_install("contextily")
+library(randomForest)
+library(sperrorest)
+library(automap)
+library(Metrics)
 ```
 
+# 1. Dataset
 
-```{python}
+There are 120 points located on the area of Warsaw. The point map allows identifying the main spatial features of the studied phenomenon and locating local outliers.
+```{python, message=FALSE, warning=FALSE, error=FALSE, fig.cap = 'Figure 1. Map'}
 import pandas as pd
 import geopandas
 import matplotlib.pyplot as plt
@@ -62,8 +69,218 @@ ax = stacje.plot(markersize=1)
 contextily.add_basemap(ax, crs=stacje.crs.to_string())
 plt.show()
 ```
+```{r, include=FALSE}
+dane <- read_excel("/Users/alubis/Desktop/dane_semi2.xlsx")
+dane$x= as.numeric(dane$x)
+dane$y= as.numeric(dane$y)
+dane$cena = as.numeric(gsub(",", ".", dane$cena, fixed=TRUE))
+dane$N = dane$`wielkosc ruchu`
+dane$`liczba gwiazdek` = as.numeric(gsub(",", ".", dane$`liczba gwiazdek`, fixed=TRUE))
+dane$`średni spędzany czas (min)`=as.numeric(dane$`średni spędzany czas (min)`)
+dane.sp = dane[1:103,]
+dane.sp = dane.sp %>% dplyr::select(c("x","y"))
+```
+
+The distribution of the average traffic volume and the basic descriptive statistics allow us to notice a clear variation in traffic volume between stations. The station with the most traffic has twice as many average customers per week as the station with the least traffic.
+```{r, message=FALSE, warning=FALSE, fig.cap = 'Figure 2. Distribution of the average number of customers at stations in Warsaw'}
+ggplot(data = dane, aes(x = N)) +
+  geom_histogram(position = 'stack', aes(y = ..count..), color='skyblue')
+```
+```{r, include=FALSE}
+dane <- read.csv("/Users/alubis/geo_project/dane_ost.csv", sep=",")
+dane = cbind(dane, dane.sp)
+```
+
+Variables describing spatial relationships between points will be used for the model. These include the following characteristics: number of neighboring stations within 5 and 10 km, average distance from the nearest arterial road, average distance from the nearest exit road, distance from the center, distance from the nearest neighboring station. Variables were aggregated at different levels (min, max, mean, median) to compare different types of interactions between points. The distances given are measured in km, but not in a straight line, but by the shortest access route determined by OSM. For comparison, the length of Warsaw to the west is 28 km. 
+```{r}
+modelformula <- ruch ~ x + y+ min_odl_trunk + max_odl_trunk +
+avg_odl_trunk + min_odl_primary + max_odl_primary + avg_odl_primary + od_centrum + 
+od_stacji_min + od_stacji_max + ile_stacji_r5 + ile_stacji_r10
+modelformula
+```
+There are 120 stations in Warsaw belonging to 5 different networks and with different service and location characteristics. Within a 5 km radius, the average number of neighboring stations is 3.5, while within a 10 km radius, the average is 20 stations. There are points that are located in such a way that they have no neighbor at all within a 5 km radius and at most one within a 10 km radius. In places with the highest density, up to 8 stations are located within 5 km, and up to 43 stations within 10 km. On the other hand, the closest points are located only 600 m from each other. On average, they are 3 km apart, and the farthest distance between points is 8.6 km. Analyzing the data for the average distance from the nearest arterial road and exit road, the average distances are 20 km and 38 km, respectively. 25% of the gas stations are located 1.2 km from the nearest arterial and 4 km from the nearest exit road, while 75% are located 5 and 10 km away.
+
+# 2. Kriging
+
+There are several definitions of this technique, although the most accurate was given by Krige (1981) for metal ores: "a multiple regression procedure for obtaining the best linear unweighted [prediction] or the best linearly weighted moving average [predictor] of an ore deposit (of any size) by assigning an optimal set of weights to all available and relevant data inside and outside the ore block."
+
+```{r, include=FALSE}
+dane <- read_excel("/Users/alubis/geo_project/dane_semi2.xlsx")
+dane$x= as.numeric(dane$x)
+dane$y= as.numeric(dane$y)
+dane$cena = as.numeric(gsub(",", ".", dane$cena, fixed=TRUE))
+dane$N = dane$`wielkosc ruchu`
+dane$`liczba gwiazdek` = as.numeric(gsub(",", ".", dane$`liczba gwiazdek`, fixed=TRUE))
+dane$`średni spędzany czas (min)`=as.numeric(dane$`średni spędzany czas (min)`)
+
+# dane punktowe
+dane.sp <- dane
+coordinates(dane.sp) <- c("x","y")
+```
+
+Splitting the dataset into training and testing parts, without considering spatial autocorrelation and spatial sampling of the dataset.
 
 ```{r}
-py$x
+dane.sp$r<-runif(dim(dane.sp)[1])
+input <- dane.sp[dane.sp$r<0.8, ] # wybranie 80% danych na zbiór treningowy 
+output <- dane.sp[dane.sp$r>0.8, ]
 ```
+
+```{r,include=FALSE, message=FALSE, warning=FALSE, error=FALSE}
+pow<-readOGR("/Users/alubis/Desktop/OneDrive/mag/Powiaty", "Powiaty")
+pow<-spTransform(pow, CRS("+proj=longlat +datum=NAD83"))
+pow2 =pow[pow@data[["JPT_NAZWA_"]]=="powiat Warszawa",]
+pow2<-spTransform(pow2, CRS("+proj=merc +datum=NAD83"))
+W<-as(pow2, "owin")
+
+# wykres krigingu
+#plot(W, main="In-sample and out-of-sample data") 
+#points(input@coords , pch=16)
+#points(output@coords, col="red", pch=16, add=TRUE) 
+#legend("left", legend=c("input data", "output data"),col=c("black", "red"), pch=16)
+```
+
+Ordinary kriging assumes that the mean value is unknown across the study region.
+```{r, message=FALSE, warning=FALSE, error=FALSE, fig.cap = 'Figure 2. Variogram for the kriging models.'}
+# zwykły kriging (ordinary kriging) 
+ok.var <- autofitVariogram(N~1, input) 
+plot(ok.var)
+## zwykły kriging
+ok.xy <- autoKrige(N~1, input, output, verbose=FALSE)
+```
+Universal kriging takes into account the presence of a spatial trend, in the simplest case expressed as a function of Cartesian coordinates, but can also use any additional data (known as spatial accompanying variables).
+```{r, fig.cap = 'Figure 2. Variogram for the kriging models.'}
+# uniwersalny kriging oparty na funkcji współrzędnych Kartezjańskich 
+uk.var.1 <- autofitVariogram(N~x+y, input) 
+## uniwersalny kriging, x+y
+uk.xy <- autoKrige(N~x+y, input, output, verbose=FALSE)
+plot(uk.var.1)
+```
+The fitted variogram model for all cases is a parameterization of the Stein's Matérna covariance function with shape parameter κ = 0.4. Sills of all variograms are not flat, indicating the presence of spatial variation in the data.
+
+Graph of kriging interpolation results: 
+a) original data, 
+b) ordinary kriging, 
+c) universal kriging
+```{r}
+## original values
+result0<-automapPlot(output, "N", main="Original \n data") 
+result0
+```
+
+```{r}
+## ordinary
+par(mfrow=c(1,2))
+result1<-automapPlot(ok.xy$krige_output, "var1.pred", main="Ordinary
+kriging") 
+result1
+## universal, x+y
+result2<-automapPlot(ok.xy$krige_output, "var1.pred", main="Universal
+kriging") 
+result2
+```
+Visual analysis suggests that all methods produce roughly similar results.
+
+```{r}
+rmse_ord <- rmse(output$N, ok.xy$krige_output@data$var1.pred) 
+rmse_un_xy <- rmse(output$N, uk.xy$krige_output@data$var1.pred)
+rmse_ord
+rmse_un_xy
+```
+The RMSE value is smallest for ordinary kriging.
+
+# 3. Non- spatial ML
+
+Another method that was used for the study was the random forest model. The model without considering the spatial nature of the variables will be the first to be estimated.
+
+```{r, include=FALSE}
+dane <- read_excel("/Users/alubis/Desktop/dane_semi2.xlsx")
+dane$x= as.numeric(dane$x)
+dane$y= as.numeric(dane$y)
+dane$cena = as.numeric(gsub(",", ".", dane$cena, fixed=TRUE))
+dane$N = dane$`wielkosc ruchu`
+dane$`liczba gwiazdek` = as.numeric(gsub(",", ".", dane$`liczba gwiazdek`, fixed=TRUE))
+dane$`średni spędzany czas (min)`=as.numeric(dane$`średni spędzany czas (min)`)
+dane.sp = dane[1:103,]
+dane.sp = dane.sp %>% dplyr::select(c("x","y"))
+dane <- read.csv("/Users/alubis/geo_project/dane_ost.csv", sep=",")
+dane = cbind(dane, dane.sp)
+
+dane$r<-runif(dim(dane)[1])
+# nowe obiekty są klasy SpatialPointsDataFrame:
+train <- dane[dane$r<0.8, ] # wybranie 80% danych na zbiór treningowy 
+test <- dane[dane$r>0.8, ] # wybranie 20% danych na zbiór testowy
+```
+
+Basic model without hyperparameter optimization
+```{r}
+set.seed(1234)
+random.forest <- randomForest(modelformula,
+                                    data = train,
+                                    ntree = 50,
+                                    sampsize = 50,
+                                    mtry = 6,
+                                    importance = TRUE)
+print(random.forest)
+```
+
+## The use of cross-validation and optimization of hyperparameters
+
+*The role of cross-validation is:*
+ 1) estimation of prediction error,
+ 2) detection of model overfitting
+ 3) hyperparameter tuning (mainly in machine learning models). 
+ 
+There are different methods for splitting data into training and test data in cross-validation. The most common one is called k-fold crossvalidation. It consists in randomly dividing the sample into k subsamples (usually k=5 in small sample situation and k=10 in large sample situation) and running the model k times on k-1 samples, leaving in each iteration 1 subsample as the validation set (different in each of k iterations). In this way, each observation is in the validation set once and k-1 times in the training set.
+
+```{r}
+tc <- trainControl(method = "cv", 
+                   number = 5)
+
+parameters_rf <- expand.grid(mtry = 1:10)
+
+set.seed(1234)
+random.forest_2 <- 
+  train(modelformula, 
+        data = train, 
+        method = "rf", 
+        ntree=50,
+        tuneGrid = parameters_rf, 
+        trControl = tc,
+        importance = TRUE)
+print(random.forest_2)
+```
+
+# 4. Spatial ML
+
+The results of a cross-validation procedure using spatial sampling can be easily obtained from the sperrorest() function. The names of the columns containing the spatial coordinates needed to implement spatial sampling are defined using a text vector in the coords argument.
+
+```{r, fig.cap = 'Figure 2. Spatial distribution of points from the learning set (black points) and validation set (red points) selected in the validation 5-fold random draw from blocks formed by k-means.'}
+resamp<-partition_cv(train, nfold=5, repetition=1, seed1=1) 
+plot(resamp, train, coords = c("x","y"))
+```
+Estimates for block sampling based on k-means are presented below. In this sampling scheme, k spatial blocks of observations with average counts n/k (where k is the number of folds and n is the number of observations) are determined based on the kmeans algorithm. Their characteristic is the spatial clustering of observations. Then k-1 folds form the training set, and the kth spatially homogeneous cluster is the test set. 
+
+```{r}
+set.seed(1234)
+res_rf_kmeans<-sperrorest(modelformula, data=train, 
+                          coords = c("x", "y"),
+                          model_fun=randomForest, 
+                          model_args=list(ntree=50, mtry=1), 
+                          smp_fun=partition_kmeans,
+                          progres='all', 
+                          smp_args=list(repetition=100, nfold=5, seed1=1234))
+
+round(summary(res_rf_kmeans$error_rep), 3)
+```
+
+# 5. Summary
+
+# 6. Hint: how do you reproduce the research?
+
+Data on traffic volumes and station locations were scraped from google maps. Using the code contained in the *"google_scrap.py"* file, it is very easy to repeat the study by refreshing the dataset with new data. It is also possible to add to the study the analysis of changes in the examined dependencies over time.
+
+# 7. Comparison with study results
+
+
 
