@@ -130,27 +130,32 @@ W<-as(pow2, "owin")
 Ordinary kriging assumes that the mean value is unknown across the study region.
 ```{r, message=FALSE, warning=FALSE, error=FALSE, fig.cap = 'Figure 3. Variogram for the kriging models.'}
 # zwykły kriging (ordinary kriging) 
+set.seed(1234)
 ok.var<- autofitVariogram(ruch~1, input) 
 plot(ok.var)
 ## zwykły kriging
-ok.xy <- autoKrige(ruch~1, input, output, verbose=FALSE)
+set.seed(1234)
+ok.xy <- autoKrige(ruch~1, input, output, verbose=FALSE, model = c("Sph", "Exp", "Gau", "Ste"), kappa = c(0.05, seq(0.2, 2, 0.1), 5, 10))
 ```
 
 ## Universal kriging
 
 Universal kriging takes into account the presence of a spatial trend, in the simplest case expressed as a function of Cartesian coordinates, but can also use any additional data (known as spatial accompanying variables).
-```{r, fig.cap = 'Figure 4. Variograms for the kriging models.'}
+espectively. Exponential, spherical, and Gaussian models were used to compute the variograms. 
+```{r, message=FALSE, warning=FALSE, error=FALSE,fig.cap = 'Figure 4. Variograms for the kriging models.'}
 # uniwersalny kriging oparty na funkcji współrzędnych Kartezjańskich 
+set.seed(1234)
 uk.var.1 <- autofitVariogram(ruch~x+y+ min_odl_trunk + max_odl_trunk +
 avg_odl_trunk + min_odl_primary + max_odl_primary + avg_odl_primary + od_centrum + 
 od_stacji_min + od_stacji_max + ile_stacji_r5 + ile_stacji_r10, input) 
 ## uniwersalny kriging, x+y
+set.seed(1234)
 uk.xy <- autoKrige(ruch~x+y+ min_odl_trunk + max_odl_trunk +
 avg_odl_trunk + min_odl_primary + max_odl_primary + avg_odl_primary + od_centrum + 
-od_stacji_min + od_stacji_max + ile_stacji_r5 + ile_stacji_r10, input, output, verbose=FALSE)
+od_stacji_min + od_stacji_max + ile_stacji_r5 + ile_stacji_r10, input, output, verbose=FALSE, model = c("Sph", "Exp", "Gau", "Ste"), kappa = c(0.05, seq(0.5, 10, 5), 5, 10))
 plot(uk.var.1)
 ```
-The fitted variogram model for all cases is a parameterization of the Stein's Matérna covariance function with shape parameter κ = 0.4. Sills of all variograms are not flat, indicating the presence of spatial variation in the data.
+The fitted variogram model for all cases is a parameterization of the Stein's Matérna covariance function with shape parameter κ in sequence from 0.05 to 2 in 0.1 increments. Sills of all variograms are not flat, indicating the presence of spatial variation in the data.
 
 *Graph of kriging interpolation results:*
 a) original data, 
@@ -225,7 +230,7 @@ regressionMetrics <- function(real, predicted) {
 }
 ```
 
-Basic model without hyperparameter optimization
+Basic model without hyperparameter optimization with parameter mtry equal to the root of the number of explanatory variables in the model.
 ```{r}
 set.seed(1234)
 mtry <- sqrt(ncol(dane))
@@ -242,6 +247,7 @@ print(random.forest_basic)
 a = regressionMetrics(real = test$ruch,
                   predicted = predict(random.forest_basic, test))
 ```
+
 ## The use of cross-validation and optimization of hyperparameters
 
 *The role of cross-validation is:*
@@ -249,8 +255,9 @@ a = regressionMetrics(real = test$ruch,
  2) detection of model overfitting
  3) hyperparameter tuning (mainly in machine learning models). 
  
-There are different methods for splitting data into training and test data in cross-validation. The most common one is called k-fold crossvalidation. It consists in randomly dividing the sample into k subsamples (usually k=5 in small sample situation and k=10 in large sample situation) and running the model k times on k-1 samples, leaving in each iteration 1 subsample as the validation set (different in each of k iterations). In this way, each observation is in the validation set once and k-1 times in the training set.
+There are different methods for splitting data into training and test data in cross-validation. The most common one is called k-fold crossvalidation. It consists in randomly dividing the sample into k subsamples (usually k=5 in small samples and k=10 in large samples) and running the model k times on k-1 samples, leaving in each iteration 1 subsample as the validation set (different in each of k iterations). In this way, each observation is in the validation set once and k-1 times in the training set.
 
+In this case, mtry parameters from 1 to 15 and the following number of trees will be checked: 50,100,150,300,450,600.
 ```{r, message=FALSE, warning=FALSE}
 control <- trainControl(method="repeatedcv", number=5, repeats=3, search="random")
 
@@ -281,17 +288,20 @@ print(random.forest_2)
 ```{r, message=FALSE, warning=FALSE, error=FALSE, fig.cap = 'Figure 4. Models results.'}
 plot(random.forest_2)
 ```
+The smallest prediction errors are obtained for the parameter mtry equal to `r random.forest_2$bestTune$mtry` and for the number of trees equal to `r random.forest_2$bestTune$ntree`.
+
 ```{r}
 set.seed(1234)
 random.forest <- randomForest(modelformula,
                                     data = train,
-                                    ntree = 450,
+                                    ntree = random.forest_2$bestTune$ntree,
                                     sampsize = 50,
-                                    mtry = 1,
+                                    mtry = random.forest_2$bestTune$mtry,
                                     importance = TRUE)
 print(random.forest)
 ```
 
+The prediction error values on the test set for the model after hyperparameter optimization are shown in the table below.
 ```{r}
 b = regressionMetrics(real = test$ruch,
                   predicted = predict(random.forest, test))
@@ -313,7 +323,7 @@ set.seed(1234)
 res_rf_kmeans<-sperrorest(modelformula, data=dane, 
                           coords = c("x", "y"),
                           model_fun=randomForest, 
-                          model_args=list(ntree=450, mtry=1), 
+                          model_args=list(ntree=random.forest_2$bestTune$ntree, mtry=random.forest_2$bestTune$mtry), 
                           smp_fun=partition_kmeans,
                           progres='all', 
                           smp_args=list(repetition=3, nfold=5, seed1=1234))
@@ -332,12 +342,13 @@ table$rmse= as.numeric(table$rmse)
 table %>% arrange(rmse)
 ```
 
+In summary, the smallest value of prediction errors on the test set is characterized by 'ordinary kriging'. Both kriging methods gave better results. For the random forest algorithm, the use of spatial resampling and cross-validation produced a better model than the traditional method.
 
-# 6. Hint: how do you reproduce the research?
+# 6. Comparison with study results
 
-Data on traffic volumes and station locations were scraped from google maps. Using the code contained in the *"google_scrap.py"* file, it is very easy to repeat the study by refreshing the dataset with new data. It is also possible to add to the study the analysis of changes in the examined dependencies over time.
+This study is inspired by the study *"A Machine Learning-Based Approach for Spatial Estimation Using the Spatial Features of Coordinate Information"*. For a dataset characterized by spatial autocorrelation, two methods were applied for comparison. One of them was kriging. Similar to the study by Seongin Ahn and Dong-Woo Ryu, exponential, spherical, and Gaussian models were used to compute the variograms. The sequence of kappa parameter values was also checked and the final kriging model received a prediction error on a test set of size *`r round(rmse_ord,2)`*, with an average predicted number of customers equal to *`r mean(train$ruch)`* The authors of the paper as another method suitable for use with spatial models was random forest incorporating spatial cross-validation. The results of this model were compared with random forest models without taking into account the spatial nature of the variables (*RMSE `r round(b$RMSE,2)`*). A lower prediction error value was obtained for the spatial model (*`r round(mean(res_rf_kmeans$error_rep$test_rmse),2)`*). *The authors of this study concluded that MLAs showed prediction performance and spatial mapping results similar to those of Kriging. We can see similar findings for our study.* Slightly better results were obtained with ordinary kriging.
 
-# 7. Comparison with study results
+# 7. Hint: how do you reproduce the research?
 
-
+The number of customers and station locations were scraped from google maps. Using the code contained in the *"google_scrap.py"* file, it is very easy to repeat the study by refreshing the dataset with new data. It is also possible to add to the study the analysis of changes in the examined dependencies over time. Using the algorithm, we can update the dataset and predict the number of locations by choosing the model that gives the lowest estimation errors. 
 
